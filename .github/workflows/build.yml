@@ -32,5 +32,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: CluckDrunk-APK
-          path: myApp/platforms/android/app/build/outputs/apk/release/
-          
+          path: myApp/**/*.apk
