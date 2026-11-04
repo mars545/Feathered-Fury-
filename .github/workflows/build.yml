@@ -26,12 +26,15 @@ jobs:
           cordova platform add android
           rm -rf www/*
           cp -r ../index.html www/
-          cordova build android --release
+          cordova build android
 
-      - name: Find and Upload APK
+      - name: Prepare APK for download
+        run: |
+          mkdir -p apk-output
+          find myApp -name "*.apk" -exec cp {} apk-output/ \;
+
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: CluckDrunk-APK
-          path: |
-            myApp/platforms/android/app/build/outputs/apk/release/*.apk
-            myApp/platforms/android/app/build/outputs/apk/debug/*.apk
+          path: apk-output/*.apk
