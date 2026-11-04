@@ -1,0 +1,36 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install Apache Cordova
+        run: npm install -g cordova
+
+      - name: Create Cordova Project
+        run: |
+          cordova create myApp com.marius.cluckdrunk CluckDrunk
+          cd myApp
+          cordova platform add android
+          rm -rf www/*
+          cp -r ../index.html www/
+          cordova build android --release
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CluckDrunk-APK
+          path: myApp/platforms/android/app/build/outputs/apk/release/app-release-unsigned.apk
+          
