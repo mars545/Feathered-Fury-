@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Găinile Răzbuna-se: Ferma lui Marius</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            user-select: none;
+        }
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #121212;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: #ffffff;
+        }
+        canvas {
+            display: block;
+            background: #2b4518; /* Culoare de iarbă de fermă */
+        }
+        /* Ecranele de meniu / UI */
+        .screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background: rgba(15, 15, 15, 0.92);
+            z-index: 10;
+            padding: 20px;
+            text-align: center;
+        }
+        h1 {
+            color: #ffcc00;
+            font-size: 2rem;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px #ff3300;
+        }
+        p {
+            max-width: 450px;
+            font-size: 0.95rem;
+            line-height: 1.5;
+            color: #ccc;
+            margin-bottom: 25px;
+        }
+        .btn {
+            background-color: #e65c00;
+            color: white;
+            border: none;
+            padding: 14px 30px;
+            font-size: 1.1rem;
+            font-weight: bold;
+            border-radius: 8px;
+            cursor: pointer;
+            box-shadow: 0 4px 10px rgba(230, 92, 0, 0.4);
+            transition: transform 0.1s;
+        }
+        .btn:active {
+            transform: scale(0.95);
+        }
+        /* HUD în timpul jocului */
+        #hud {
+            position: absolute;
+            top: 15px;
+            left: 15px;
+            right: 15px;
+            display: flex;
+            justify-content: space-between;
+            font-size: 1.1rem;
+            font-weight: bold;
+            z-index: 5;
+            pointer-events: none;
+            text-shadow: 1px 1px 3px #000;
+        }
+        .hidden {
+            display: none !important;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Ecranul de Start / Povestea -->
+    <div id="startScreen" class="screen">
+        <h1>Ferma Blestemată: Răzbunarea Găinilor</h1>
+        <p>
+            Lui <strong>Marius</strong> i s-a acrit de viața la oraș și s-a întors la țară. 
+            Numai că bunicii l-au dat afară din curte că nu voia să sape grădina. 
+            Rămas fără casă și înarmat doar cu ce-a găsit prin beci, Marius trebuie acum să supraviețuiască zilnic atacurilor necruțătoare ale găinilor furioase!
+        </p>
+        <button class="btn" onclick="startGame()">ÎNCEPE LUPTA</button>
+    </div>
+
+    <!-- Ecranul de Game Over -->
+    <div id="gameOverScreen" class="screen hidden">
+        <h1>TE-AU RPUS GĂINILE!</h1>
+        <p id="finalStats">Ai rezistat 0 secunde și ai băut 0 sticle.</p>
+        <button class="btn" onclick="startGame()">ÎNCEARCĂ DIN NOU</button>
+    </div>
+
+    <!-- HUD Joc -->
+    <div id="hud" class="hidden">
+        <div>Timp: <span id="timeVal">0</span>s</div>
+        <div>Armă: <span id="weaponVal">Bere (Lv. 1)</span></div>
+        <div>Scor: <span id="scoreVal">0</span></div>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        let gameState = 'START'; // START, PLAYING, GAMEOVER
+        let score = 0;
+        let gameTime = 0;
+        let timerInterval = null;
+
+        // Date jucător (Marius)
+        let player = {
+            x: canvas.width / 2,
+            y: canvas.height / 2,
+            radius: 20,
+            speed: 3.5,
+            hp: 100,
+            maxHp: 100
+        };
+
+        let chickens = [];
+        let projectiles = [];
+        let backgroundFarmers = []; // Fermieri pe fundal în meniu (estetică)
+
+        // Sistem de arme (Lvl 1 Bere -> Lvl 2 Vodcă -> Lvl 3 Vin Scump)
+        let weaponLevel = 1;
+        let attackCooldown = 0;
+
+        function getWeaponName() {
+            if (weaponLevel === 1) return "Bere la PET (Lv. 1)";
+            if (weaponLevel === 2) return "Vodcă la sticlă (Lv. 2)";
+            return "Vin Scump de colecție (Lv. 3)";
+        }
+
+        // Inițializare fermieri decorativi pentru fundalul din meniu
+        function initBackgroundFarmers() {
+            backgroundFarmers = [];
+            for (let i = 0; i < 5; i++) {
+                backgroundFarmers.push({
+                    x: Math.random() * canvas.width,
+                    y: Math.random() * canvas.height,
+                    vx: (Math.random() - 0.5) * 1.5,
+                    vy: (Math.random() - 0.5) * 1.5
+                });
+            }
+        }
+        initBackgroundFarmers();
+
+        // Control tactile / mouse pentru mișcare
+        let touchX = null;
+        let touchY = null;
+        let isTouching = false;
+
+        window.addEventListener('pointerdown', (e) => {
+            if (gameState === 'PLAYING') {
+                isTouching = true;
+                touchX = e.clientX;
+                touchY = e.clientY;
+            }
+        });
+
+        window.addEventListener('pointermove', (e) => {
+            if (isTouching && gameState === 'PLAYING') {
+                touchX = e.clientX;
+                touchY = e.clientY;
+            }
+        });
+
+        window.addEventListener('pointerup', () => {
+            isTouching = false;
+        });
+
+        function startGame() {
+            document.getElementById('startScreen').classList.add('hidden');
+            document.getElementById('gameOverScreen').classList.add('hidden');
+            document.getElementById('hud').classList.remove('hidden');
+
+            player.x = canvas.width / 2;
+            player.y = canvas.height / 2;
+            player.hp = 100;
+            score = 0;
+            gameTime = 0;
+            weaponLevel = 1;
+            chickens = [];
+            projectiles = [];
+            
+            gameState = 'PLAYING';
+
+            if (timerInterval) clearInterval(timerInterval);
+            timerInterval = setInterval(() => {
+                if (gameState === 'PLAYING') {
+                    gameTime++;
+                    document.getElementById('timeVal').innerText = gameTime;
+
+                    // Progresie armă în funcție de scor / timp
+                    if (gameTime > 15 && weaponLevel === 1) weaponLevel = 2;
+                    if (gameTime > 35 && weaponLevel === 2) weaponLevel = 3;
+                    document.getElementById('weaponVal').innerText = getWeaponName();
+                }
+            }, 1000);
+        }
+
+        function spawnChicken() {
+            if (gameState !== 'PLAYING') return;
+            // Generează găini de la marginea ecranului
+            let edge = Math.floor(Math.random() * 4);
+            let x, y;
+            if (edge === 0) { x = Math.random() * canvas.width; y = -30; }
+            else if (edge === 1) { x = Math.random() * canvas.width; y = canvas.height + 30; }
+            else if (edge === 2) { x = -30; y = Math.random() * canvas.height; }
+            else { x = canvas.width + 30; y = Math.random() * canvas.height; }
+
+            chickens.push({
+                x: x,
+                y: y,
+                radius: 14,
+                speed: 1.8 + Math.min(gameTime * 0.03, 2),
+                hp: weaponLevel === 1 ? 1 : (weaponLevel === 2 ? 2 : 3)
+            });
+        }
+
+        // Spawn periodic de găini
+        setInterval(() => {
+            if (gameState === 'PLAYING') {
+                spawnChicken();
+                if (gameTime > 20) spawnChicken(); // Mai multe găini pe măsură ce treci în revistă timpul
+            }
+        }, 1200);
+
+        // Bucla principală de desen și logică
+        function update() {
+            if (gameState === 'PLAYING') {
+                // Mișcare jucător spre deget / touch
+                if (isTouching && touchX !== null && touchY !== null) {
+                    let dx = touchX - player.x;
+                    let dy = touchY - player.y;
+                    let dist = Math.hypot(dx, dy);
+                    if (dist > 2) {
+                        player.x += (dx / dist) * player.speed;
+                        player.y += (dy / dist) * player.speed;
+                    }
+                }
+
+                // Limitare margini ecran
+                player.x = Math.max(player.radius, Math.min(canvas.width - player.radius, player.x));
+                player.y = Math.max(player.radius, Math.min(canvas.height - player.radius, player.y));
+
+                // Auto-atac (Marius aruncă sticle spre cea mai apropiată găină)
+                attackCooldown++;
+                let fireRate = weaponLevel === 1 ? 45 : (weaponLevel === 2 ? 35 : 25);
+                if (attackCooldown >= fireRate && chickens.length > 0) {
+                    attackCooldown = 0;
+                    // Găsește cea mai apropiată găină
+                    let closest = chickens[0];
+                    let minDist = Math.hypot(closest.x - player.x, closest.y - player.y);
+                    for (let c of chickens) {
+                        let d = Math.hypot(c.x - player.x, c.y - player.y);
+                        if (d < minDist) {
+                            minDist = d;
+                            closest = c;
+                        }
+                    }
+                    // Trage proiectil
+                    let angle = Math.atan2(closest.y - player.y, closest.x - player.x);
+                    projectiles.push({
+                        x: player.x,
+                        y: player.y,
+                        vx: Math.cos(angle) * 7,
+                        vy: Math.sin(angle) * 7,
+                        damage: weaponLevel
+                    });
+                }
+
+                // Update Proiectile
+                for (let i = projectiles.length - 1; i >= 0; i--) {
+                    let p = projectiles[i];
+                    p.x += p.vx;
+                    p.y += p.vy;
+
+                    // Șterge proiectile ieșite din ecran
+                    if (p.x < 0 || p.x > canvas.width || p.y < 0 || p.y > canvas.height) {
+                        projectiles.splice(i, 1);
+                        continue;
+                    }
+
+                    // Coliziune proiectil - găină
+                    for (let j = chickens.length - 1; j >= 0; j--) {
+                        let c = chickens[j];
+                        let dist = Math.hypot(p.x - c.x, p.y - c.y);
+                        if (dist < p.radius + c.radius) {
+                            c.hp -= p.damage;
+                            projectiles.splice(i, 1);
+                            if (c.hp <= 0) {
+                                chickens.splice(j, 1);
+                                score += 10;
+                                document.getElementById('scoreVal').innerText = score;
+                            }
+                            break;
+                        }
+                    }
+                }
+
+                // Update Găini
+                for (let i = chickens.length - 1; i >= 0; i--) {
+                    let c = chickens[i];
+                    let dx = player.x - c.x;
+                    let dy = player.y - c.y;
+                    let dist = Math.hypot(dx, dy);
+
+                    c.x += (dx / dist) * c.speed;
+                    c.y += (dy / dist) * c.speed;
+
+                    // Coliziune găină - jucător
+                    if (dist < player.radius + c.radius) {
+                        player.hp -= 0.8; // Scade viața treptat
+                        if (player.hp <= 0) {
+                            gameState = 'GAMEOVER';
+                            document.getElementById('hud').classList.add('hidden');
+                            document.getElementById('gameOverScreen').classList.remove('hidden');
+                            document.getElementById('finalStats').innerText = `Ai rezistat ${gameTime} secunde și ai făcut ${score} puncte! Bunicii te-au văzut din prispă și au râs.`;
+                        }
+                    }
+                }
+            }
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            if (gameState === 'START') {
+                // Desenare fermieri pe fundal în meniu
+                ctx.fillStyle = '#335c1e';
+                for (let f of backgroundFarmers) {
+                    f.x += f.vx;
+                    f.y += f.vy;
+                    if (f.x < 0 || f.x > canvas.width) f.vx *= -1;
+                    if (f.y < 0 || f.y > canvas.height) f.vy *= -1;
+
+                    ctx.beginPath();
+                    ctx.arc(f.x, f.y, 15, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                return;
+            }
+
+            if (gameState === 'PLAYING') {
+                // Desenează Găinile (cercuri albe cu cioc roșu)
+                for (let c of chickens) {
+                    ctx.fillStyle = '#ffffff';
+                    ctx.beginPath();
+                    ctx.arc(c.x, c.y, c.radius, 0, Math.PI * 2);
+                    ctx.fill();
+                    // Cioc găină
+                    ctx.fillStyle = '#ff9900';
+                    ctx.fillRect(c.x + c.radius - 4, c.y - 3, 6, 6);
+                }
+
+                // Desenează Proiectilele (sticle de alcool luminoase)
+                ctx.fillStyle = weaponLevel === 1 ? '#d4af37' : (weaponLevel === 2 ? '#00ffff' : '#ff00ff');
+                for (let p of projectiles) {
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, 6, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+
+                // Desenează Jucătorul (Marius - cerc albastru cu șapcă de țară)
+                ctx.fillStyle = '#3399ff';
+                ctx.beginPath();
+                ctx.arc(player.x, player.y, player.radius, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Bara de viață a lui Marius
+                ctx.fillStyle = '#555';
+                ctx.fillRect(player.x - 25, player.y - 35, 50, 6);
+                ctx.fillStyle = '#00cc44';
+                ctx.fillRect(player.x - 25, player.y - 35, 50 * (player.hp / player.maxHp), 6);
+            }
+        }
+
+        function loop() {
+            update();
+            draw();
+            requestAnimationFrame(loop);
+        }
+
+        loop();
+    </script>
+</body>
+</html>
